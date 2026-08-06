@@ -7,8 +7,6 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
-<!-- Cutoff Forecast section (isolated add-on; scoped to #fc-forecast / .fc-*) -->
-<link rel="stylesheet" href="forecast.css">
 <style>
 /* ═══════════════════════════════════════════════════════════════════════════
    TOKENS — premium dark-on-light, Samsung-inspired with cinematic hero
@@ -709,11 +707,5 @@ buildCutoffCards();
 fetchCutoffs();
 fetchChar();
 </script>
-
-<!-- Cutoff Forecast section: self-mounting add-on. Loads after everything
-     above; if it fails, the page behaves exactly as it did before. -->
-<script defer src="forecast-core.js"></script>
-<script defer src="snapshot-store.js"></script>
-<script defer src="forecast.js"></script>
 </body>
 </html>

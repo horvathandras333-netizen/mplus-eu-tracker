@@ -1,0 +1,19 @@
+# Netlify configuration for mplus-eu-tracker.
+#
+# The site is a static directory — there is no build step, and none is added
+# here. `publish = "site"` reproduces exactly what the current drag-and-drop
+# deploy serves; the functions block is purely additive.
+
+[build]
+  publish = "site"
+  functions = "netlify/functions"
+  command = ""
+
+[functions]
+  node_bundler = "esbuild"
+
+# Snapshot history is JSON served by a function; never let a CDN pin it.
+[[headers]]
+  for = "/.netlify/functions/cutoff-history"
+  [headers.values]
+    Cache-Control = "public, max-age=300, must-revalidate"

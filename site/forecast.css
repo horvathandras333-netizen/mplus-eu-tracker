@@ -1,0 +1,291 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   forecast.css — styles for the Cutoff Forecast section only.
+
+   ISOLATION CONTRACT
+   ------------------
+   Every selector below is scoped to #fc-forecast or a .fc- prefixed class.
+   No element selectors, no :root declarations, no overrides of any existing
+   rule. This file reads the design tokens defined by index.html (--blue,
+   --pink, --gold, --border, …) but never redefines them, so the existing
+   page renders identically whether or not this stylesheet loads.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+#fc-forecast {
+  --fc-p990: var(--pink, #9b2257);   /* Top 1%   — matches its cutoff card */
+  --fc-p999: var(--gold, #b8860b);   /* Top 0.1% — matches its cutoff card */
+  --fc-grid: var(--border, #e6e6e9);
+  --fc-ink: var(--text, #1a1a1f);
+  --fc-muted: var(--muted, #71717a);
+
+  max-width: 1360px;
+  margin: 0 auto;
+  padding: 8px 28px 72px;
+}
+
+#fc-forecast .fc-label {
+  font-family: var(--display, 'Space Grotesk', sans-serif);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--fc-ink);
+  text-transform: uppercase;
+  padding-bottom: 12px;
+  border-bottom: 2px solid var(--ink, #0c0c0f);
+  margin-bottom: 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+#fc-forecast .fc-label small {
+  font-family: var(--font, sans-serif);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: .5px;
+  color: var(--fc-muted);
+  text-transform: none;
+}
+
+/* ── Prediction cards ───────────────────────────────────────────────────── */
+#fc-forecast .fc-cards {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+@media (min-width: 720px) {
+  #fc-forecast .fc-cards { grid-template-columns: 1fr 1fr; gap: 16px; }
+}
+
+#fc-forecast .fc-card {
+  background: var(--white, #fff);
+  border: 1px solid var(--border, #e6e6e9);
+  border-radius: 6px;
+  padding: 18px 20px;
+  position: relative;
+  overflow: hidden;
+  transition: transform .25s cubic-bezier(.2,.7,.3,1), box-shadow .25s, border-color .25s;
+}
+#fc-forecast .fc-card:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-md, 0 8px 30px rgba(0,0,0,.10));
+  border-color: var(--border2, #d4d4d8);
+}
+#fc-forecast .fc-card-stripe {
+  position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  background: var(--fc-series, var(--dim, #b3b3bb));
+}
+#fc-forecast .fc-card[data-series="p990"] { --fc-series: var(--fc-p990); }
+#fc-forecast .fc-card[data-series="p999"] { --fc-series: var(--fc-p999); }
+
+#fc-forecast .fc-card-head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  gap: 10px; flex-wrap: wrap;
+}
+#fc-forecast .fc-card-title {
+  font-size: 15px; font-weight: 800; letter-spacing: -.2px;
+  color: var(--fc-series, var(--fc-ink));
+}
+#fc-forecast .fc-tag {
+  font-size: 9px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase;
+  color: var(--fc-muted); border: 1px solid var(--border2, #d4d4d8);
+  border-radius: 2px; padding: 2px 7px; white-space: nowrap;
+}
+#fc-forecast .fc-card-val {
+  font-family: var(--display, sans-serif);
+  font-size: 38px; font-weight: 700; letter-spacing: -1.5px;
+  font-variant-numeric: tabular-nums; line-height: 1.1; margin: 10px 0 2px;
+  color: var(--fc-ink);
+}
+#fc-forecast .fc-card-val .fc-approx { font-size: 22px; color: var(--fc-muted); margin-right: 4px; }
+#fc-forecast .fc-card-delta { font-size: 12px; font-weight: 600; color: var(--fc-muted); }
+#fc-forecast .fc-card-delta strong { color: var(--achieved, #0d7a3e); font-weight: 800; }
+
+#fc-forecast .fc-card-rows { margin-top: 14px; border-top: 1px solid var(--border, #e6e6e9); padding-top: 10px; }
+#fc-forecast .fc-row {
+  display: flex; justify-content: space-between; gap: 12px;
+  font-size: 11px; padding: 3px 0;
+}
+#fc-forecast .fc-row .fc-k { color: var(--fc-muted); font-weight: 500; }
+#fc-forecast .fc-row .fc-v { color: var(--fc-ink); font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; }
+
+#fc-forecast .fc-trend { font-weight: 800; }
+#fc-forecast .fc-trend[data-trend="accelerating"] { color: var(--achieved, #0d7a3e); }
+#fc-forecast .fc-trend[data-trend="slowing"] { color: var(--orange, #bf5800); }
+#fc-forecast .fc-trend[data-trend="steady"] { color: var(--fc-muted); }
+
+/* ── Chart ──────────────────────────────────────────────────────────────── */
+#fc-forecast .fc-chart-wrap {
+  position: relative;
+  background: var(--white, #fff);
+  border: 1px solid var(--border, #e6e6e9);
+  border-radius: 6px;
+  padding: 18px 12px 12px;
+}
+#fc-forecast .fc-chart { display: block; width: 100%; height: auto; touch-action: pan-y; }
+#fc-forecast .fc-axis-line { stroke: var(--border2, #d4d4d8); stroke-width: 1; }
+#fc-forecast .fc-grid-line { stroke: var(--fc-grid); stroke-width: 1; }
+#fc-forecast .fc-tick {
+  font-family: var(--font, sans-serif); font-size: 11px;
+  fill: var(--fc-muted); font-variant-numeric: tabular-nums;
+}
+#fc-forecast .fc-today-line { stroke: var(--fc-muted); stroke-width: 1; stroke-dasharray: 3 4; opacity: .6; }
+#fc-forecast .fc-today-label {
+  font-family: var(--font, sans-serif); font-size: 10px; font-weight: 700;
+  letter-spacing: 1px; text-transform: uppercase; fill: var(--fc-muted);
+}
+#fc-forecast .fc-line { fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+#fc-forecast .fc-line-forecast { fill: none; stroke-width: 2.5; stroke-dasharray: 7 6; stroke-linecap: round; opacity: .9; }
+#fc-forecast .fc-band { stroke: none; opacity: .13; }
+#fc-forecast .fc-dot { stroke: var(--white, #fff); stroke-width: 2; }
+#fc-forecast .fc-dot-target { stroke-width: 2; fill: var(--white, #fff); }
+#fc-forecast .fc-hover-line { stroke: var(--fc-ink); stroke-width: 1; opacity: .25; }
+#fc-forecast .fc-hover-dot { stroke: var(--white, #fff); stroke-width: 2; }
+
+#fc-forecast .fc-legend {
+  display: flex; flex-wrap: wrap; gap: 8px 20px;
+  margin-top: 14px; padding-top: 12px;
+  border-top: 1px solid var(--border, #e6e6e9);
+  font-size: 11px; color: var(--fc-muted);
+}
+#fc-forecast .fc-legend-item { display: flex; align-items: center; gap: 7px; }
+#fc-forecast .fc-swatch { width: 22px; height: 0; border-top-width: 2.5px; border-top-style: solid; flex-shrink: 0; }
+#fc-forecast .fc-swatch[data-style="dashed"] { border-top-style: dashed; }
+#fc-forecast .fc-swatch[data-style="band"] { height: 10px; border: none; border-radius: 2px; opacity: .18; }
+
+/* ── Tooltip ────────────────────────────────────────────────────────────── */
+#fc-forecast .fc-tip {
+  position: absolute; pointer-events: none; z-index: 5;
+  background: var(--ink, #0c0c0f); color: #fff;
+  border-radius: 4px; padding: 9px 12px; min-width: 148px;
+  font-size: 11px; line-height: 1.5;
+  box-shadow: var(--shadow-md, 0 8px 30px rgba(0,0,0,.10));
+  opacity: 0; transform: translateY(4px);
+  transition: opacity .15s, transform .15s;
+}
+#fc-forecast .fc-tip.fc-on { opacity: 1; transform: translateY(0); }
+#fc-forecast .fc-tip-date {
+  font-weight: 800; letter-spacing: .3px; margin-bottom: 5px;
+  padding-bottom: 5px; border-bottom: 1px solid rgba(255,255,255,.18);
+}
+#fc-forecast .fc-tip-row { display: flex; align-items: center; gap: 8px; }
+#fc-forecast .fc-tip-row .fc-tip-key { color: rgba(255,255,255,.65); }
+#fc-forecast .fc-tip-row .fc-tip-val { margin-left: auto; font-weight: 800; font-variant-numeric: tabular-nums; }
+#fc-forecast .fc-tip-chip { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+#fc-forecast .fc-tip-kind {
+  margin-top: 6px; font-size: 9px; font-weight: 700; letter-spacing: 1px;
+  text-transform: uppercase; color: rgba(255,255,255,.45);
+}
+
+/* ── Methodology panel ──────────────────────────────────────────────────── */
+#fc-forecast .fc-method {
+  margin-top: 16px; border: 1px solid var(--border, #e6e6e9);
+  border-radius: 6px; background: var(--off, #fafafa);
+}
+#fc-forecast .fc-method summary {
+  cursor: pointer; list-style: none; padding: 13px 18px;
+  font-size: 12px; font-weight: 700; letter-spacing: .4px;
+  color: var(--fc-ink); display: flex; align-items: center; gap: 9px;
+}
+#fc-forecast .fc-method summary::-webkit-details-marker { display: none; }
+#fc-forecast .fc-method summary::before {
+  content: "+"; font-family: var(--display, sans-serif); font-size: 15px;
+  color: var(--blue, #1428A0); width: 14px; text-align: center;
+}
+#fc-forecast .fc-method[open] summary::before { content: "−"; }
+#fc-forecast .fc-method summary:hover { color: var(--blue, #1428A0); }
+#fc-forecast .fc-method-body {
+  padding: 0 18px 18px; font-size: 12px; line-height: 1.75; color: var(--fc-muted);
+}
+#fc-forecast .fc-method-body strong { color: var(--fc-ink); }
+#fc-forecast .fc-method-body ol { margin: 8px 0 8px 18px; }
+#fc-forecast .fc-method-body li { margin-bottom: 6px; }
+#fc-forecast .fc-method-body code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px; background: var(--subtle, #f4f4f5);
+  border: 1px solid var(--border, #e6e6e9); border-radius: 3px; padding: 1px 5px;
+}
+
+/* ── States: loading / empty / error / warning ──────────────────────────── */
+#fc-forecast .fc-note {
+  display: flex; align-items: flex-start; gap: 10px;
+  border-radius: 5px; padding: 12px 15px; font-size: 12px; line-height: 1.6;
+  margin-bottom: 16px;
+}
+#fc-forecast .fc-note-icon { font-size: 13px; line-height: 1.4; flex-shrink: 0; }
+#fc-forecast .fc-note[data-kind="warn"] {
+  background: rgba(191, 88, 0, .06);
+  border: 1px solid rgba(191, 88, 0, .25);
+  color: var(--orange, #bf5800);
+}
+#fc-forecast .fc-note[data-kind="error"] {
+  background: rgba(192, 57, 43, .06);
+  border: 1px solid rgba(192, 57, 43, .25);
+  color: var(--red, #c0392b);
+}
+#fc-forecast .fc-note ul { margin: 4px 0 0 16px; }
+
+#fc-forecast .fc-state {
+  border: 1px dashed var(--border2, #d4d4d8);
+  border-radius: 8px; padding: 44px 24px; text-align: center;
+  font-size: 12px; color: var(--fc-muted); line-height: 1.7;
+}
+#fc-forecast .fc-state-title {
+  font-family: var(--display, sans-serif); font-size: 14px; font-weight: 700;
+  color: var(--fc-ink); margin-bottom: 6px; letter-spacing: -.2px;
+}
+#fc-forecast .fc-state-retry {
+  margin-top: 14px; background: var(--blue, #1428A0); color: #fff;
+  border: none; border-radius: 3px; padding: 9px 20px;
+  font-size: 12px; font-weight: 700; font-family: var(--font, sans-serif);
+  cursor: pointer; letter-spacing: .4px;
+  transition: background .2s, box-shadow .2s;
+}
+#fc-forecast .fc-state-retry:hover {
+  background: var(--blue-hi, #2a44d4);
+  box-shadow: 0 6px 20px var(--blue-glow, rgba(20,40,160,.25));
+}
+
+#fc-forecast .fc-skeleton {
+  border-radius: 5px;
+  background: linear-gradient(90deg, var(--subtle, #f4f4f5) 25%, var(--border, #e6e6e9) 50%, var(--subtle, #f4f4f5) 75%);
+  background-size: 200% 100%;
+  animation: fc-shimmer 1.4s infinite;
+}
+@keyframes fc-shimmer { to { background-position: -200% 0; } }
+#fc-forecast .fc-skeleton-card { height: 172px; }
+#fc-forecast .fc-skeleton-chart { height: 300px; margin-top: 4px; }
+
+#fc-forecast .fc-spin {
+  display: inline-block; width: 10px; height: 10px;
+  border: 1.5px solid rgba(127,127,140,.4); border-top-color: currentColor;
+  border-radius: 50%; animation: fc-sp .7s linear infinite; vertical-align: -1px;
+}
+@keyframes fc-sp { to { transform: rotate(360deg); } }
+
+#fc-forecast .fc-disclaimer {
+  margin-top: 14px; font-size: 11px; line-height: 1.7;
+  color: var(--dim, #b3b3bb); text-align: center;
+}
+
+/* ── Responsive ─────────────────────────────────────────────────────────── */
+@media (max-width: 719px) {
+  #fc-forecast { padding: 4px 18px 56px; }
+  #fc-forecast .fc-card { padding: 15px 16px; }
+  #fc-forecast .fc-card-val { font-size: 32px; }
+  #fc-forecast .fc-chart-wrap { padding: 14px 8px 10px; }
+  #fc-forecast .fc-tip { min-width: 132px; font-size: 10px; padding: 8px 10px; }
+  #fc-forecast .fc-legend { gap: 6px 14px; font-size: 10px; }
+  #fc-forecast .fc-method-body { padding: 0 15px 15px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #fc-forecast .fc-card,
+  #fc-forecast .fc-tip,
+  #fc-forecast .fc-skeleton,
+  #fc-forecast .fc-spin {
+    transition-duration: .01ms !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
