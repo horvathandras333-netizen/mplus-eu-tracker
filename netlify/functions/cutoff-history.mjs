@@ -23,12 +23,13 @@ const STORE_NAME = "cutoff-history";
 const ALLOWED_REGIONS = new Set(["us", "eu", "kr", "tw", "cn"]);
 const MAX_RECORDS = 400; // a season is far shorter; this is a runaway guard
 
-function json(body, status = 200) {
+function json(body, status = 200, extra = {}) {
   return new Response(JSON.stringify(body), {
     status,
     headers: {
       "content-type": "application/json; charset=utf-8",
-      "cache-control": "public, max-age=300"
+      "cache-control": "public, max-age=300",
+      ...extra
     }
   });
 }
@@ -61,13 +62,50 @@ export async function writeHistory(store, season, region, records) {
 }
 
 /**
- * The whole endpoint, with storage injected so it can be tested against a
- * fake blob store. `export default` binds it to the real one.
+ * Validate and upsert one snapshot. Not reachable over HTTP — the scheduled
+ * function is the only writer, so there is no unauthenticated write path.
+ *
+ * Returns a plain result object; throws only if storage itself fails.
+ */
+export async function recordSnapshot(store, raw) {
+  const record = Snapshots.normaliseRecord(raw);
+  if (!record) {
+    return { ok: false, error: "Record needs a valid date and at least one threshold." };
+  }
+  const err = validParams(record.season, record.region);
+  if (err) return { ok: false, error: err };
+
+  for (const key of ["p990", "p999"]) {
+    const v = record[key];
+    if (v !== undefined && (v < 0 || v > 100000)) {
+      return { ok: false, error: `'${key}' is out of plausible range.` };
+    }
+  }
+
+  const existing = await readHistory(store, record.season, record.region);
+  const { list, action, changed } = Snapshots.upsert(existing, record);
+  /* Only write when something actually changed — repeat runs in a day are
+     cheap no-ops rather than blob churn. */
+  if (changed || action === "inserted") {
+    await writeHistory(store, record.season, record.region, list.slice(-MAX_RECORDS));
+  }
+  return { ok: true, action, changed, count: list.length };
+}
+
+/**
+ * The endpoint, with storage injected so it can be tested against a fake blob
+ * store. `export default` binds it to the real one.
+ *
+ * READ ONLY. This used to accept POST so a visitor's browser could contribute
+ * a snapshot, but that meant an unauthenticated write reachable by anyone —
+ * a way to create unbounded blobs and burn function invocations. It became
+ * redundant once Raider.IO's own graphData turned out to carry the history,
+ * so the route is gone rather than merely guarded.
  */
 export async function handleRequest(req, store) {
   const url = new URL(req.url);
 
-  if (req.method === "GET") {
+  if (req.method === "GET" || req.method === "HEAD") {
     const season = Snapshots.normaliseSeason(url.searchParams.get("season"));
     const region = Snapshots.normaliseRegion(url.searchParams.get("region"));
     const err = validParams(season, region);
@@ -81,50 +119,11 @@ export async function handleRequest(req, store) {
     }
   }
 
-  if (req.method === "POST") {
-    let raw;
-    try {
-      raw = await req.json();
-    } catch {
-      return badRequest("Body must be JSON.");
-    }
-
-    const record = Snapshots.normaliseRecord(raw);
-    if (!record) {
-      return badRequest(
-        "Record needs a valid 'date' (YYYY-MM-DD) and at least one of 'p990' / 'p999'."
-      );
-    }
-    const err = validParams(record.season, record.region);
-    if (err) return badRequest(err);
-
-    /* Reject clearly bogus scores rather than poisoning the history. */
-    for (const key of ["p990", "p999"]) {
-      const v = record[key];
-      if (v !== undefined && (v < 0 || v > 100000)) {
-        return badRequest(`'${key}' is out of plausible range.`);
-      }
-    }
-
-    record.source = record.source || "client";
-
-    try {
-      const existing = await readHistory(store, record.season, record.region);
-      const { list, action, changed } = Snapshots.upsert(existing, record);
-      /* Only write when something actually changed — repeated calls in a day
-         are cheap no-ops rather than blob churn. */
-      if (changed || action === "inserted") {
-        await writeHistory(
-          store, record.season, record.region, list.slice(-MAX_RECORDS)
-        );
-      }
-      return json({ ok: true, action, changed, count: list.length });
-    } catch (e) {
-      return json({ error: "Could not record snapshot: " + e.message }, 502);
-    }
-  }
-
-  return json({ error: "Method not allowed." }, 405);
+  return json(
+    { error: "This endpoint is read-only. Snapshots are written by the scheduled job." },
+    405,
+    { allow: "GET, HEAD" }
+  );
 }
 
 export default async (req) => handleRequest(req, getStore(STORE_NAME));

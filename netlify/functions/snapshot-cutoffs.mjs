@@ -15,11 +15,10 @@
    ═══════════════════════════════════════════════════════════════════════════ */
 import { getStore } from "@netlify/blobs";
 import Snapshots from "../../site/snapshot-store.js";
-import { readHistory, writeHistory } from "./cutoff-history.mjs";
+import { recordSnapshot } from "./cutoff-history.mjs";
 
 const STORE_NAME = "cutoff-history";
 const SEASONS = ["season-mn-1", "season-tww-3", "season-tww-2"];
-const MAX_RECORDS = 400;
 
 function regions() {
   return (process.env.SNAPSHOT_REGIONS || "eu")
@@ -67,7 +66,7 @@ export default async () => {
         continue;
       }
 
-      const record = {
+      const outcome = await recordSnapshot(store, {
         date,
         season: live.season,
         region,
@@ -75,17 +74,9 @@ export default async () => {
         p999: live.p999,
         updatedAt: new Date().toISOString(),
         source: "scheduled"
-      };
-
-      const existing = await readHistory(store, live.season, region);
-      const { list, action, changed } = Snapshots.upsert(existing, record);
-      if (changed || action === "inserted") {
-        await writeHistory(store, live.season, region, list.slice(-MAX_RECORDS));
-      }
-
-      results.push({
-        region, season: live.season, date, action, changed, count: list.length
       });
+
+      results.push({ region, season: live.season, date, ...outcome });
     } catch (e) {
       results.push({ region, status: "error", message: e.message });
     }

@@ -17,3 +17,23 @@
   for = "/.netlify/functions/cutoff-history"
   [headers.values]
     Cache-Control = "public, max-age=300, must-revalidate"
+
+# ── Security headers ────────────────────────────────────────────────────────
+# The allowed hosts below were taken from what the page actually loads, not
+# guessed: Google Fonts for the two typefaces, raider.io for every API call,
+# render.worldofwarcraft.com for character portraits and cdn.raiderio.net for
+# dungeon art. Wildcards cover the regional render hosts.
+#
+# 'unsafe-inline' is required for both script-src and style-src because
+# index.html carries its CSS and JS inline. That weakens CSP's XSS value, but
+# frame-ancestors, img-src, connect-src, object-src and base-uri all still bite,
+# and tightening it would mean rewriting the existing page.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Content-Security-Policy = "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://*.worldofwarcraft.com https://*.raiderio.net https://*.raider.io; connect-src 'self' https://raider.io https://*.raider.io"
+    X-Content-Type-Options = "nosniff"
+    X-Frame-Options = "DENY"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "geolocation=(), camera=(), microphone=(), payment=(), usb=(), interest-cohort=()"
+    Strict-Transport-Security = "max-age=31536000; includeSubDomains"

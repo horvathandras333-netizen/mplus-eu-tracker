@@ -225,6 +225,34 @@ test("the new section mounts above the existing footer, not inside the layout", 
   assert.ok(!forecastJs.includes(".main"), "must not inject into the existing grid");
 });
 
+/* ── Security posture ───────────────────────────────────────────────────── */
+
+test("the browser never writes to the server", () => {
+  const code = stripComments(forecastJs);
+  assert.ok(!/method:\s*["']POST["']/i.test(code),
+    "forecast.js issues a POST — the endpoint is read-only by design");
+  assert.ok(!code.includes("serverWrite"), "the server write path is back");
+});
+
+test("netlify.toml ships the security headers, with the hosts the page needs", () => {
+  const toml = read("netlify.toml");
+  for (const header of [
+    "Content-Security-Policy", "X-Content-Type-Options", "X-Frame-Options",
+    "Referrer-Policy", "Permissions-Policy", "Strict-Transport-Security"
+  ]) {
+    assert.ok(toml.includes(header), `missing ${header}`);
+  }
+  /* Every host the existing page loads from must survive the CSP. */
+  for (const host of [
+    "fonts.googleapis.com", "fonts.gstatic.com",
+    "raider.io", "worldofwarcraft.com", "raiderio.net"
+  ]) {
+    assert.ok(toml.includes(host), `CSP would block ${host}`);
+  }
+  assert.ok(toml.includes("frame-ancestors 'none'"));
+  assert.ok(toml.includes("object-src 'none'"));
+});
+
 /* ── Isolation contract: the shared modules stay side-effect free ───────── */
 
 test("forecast-core.js and snapshot-store.js touch no DOM and no network", () => {

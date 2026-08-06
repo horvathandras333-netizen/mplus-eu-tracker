@@ -81,6 +81,14 @@ Record shape:
 }
 ```
 
+**The HTTP endpoint is read-only.** `cutoff-history` serves `GET`/`HEAD` and
+answers everything else with `405`. It briefly accepted `POST` so a visitor's
+browser could contribute a snapshot, which meant an unauthenticated write anyone
+on the internet could reach — a way to create unbounded blobs and burn function
+invocations. `graphData` made it redundant, so the route was removed rather than
+guarded. `recordSnapshot()` is the only writer, and only the scheduled job calls
+it.
+
 **Duplicates are impossible by construction.** Every write goes through
 `upsert()` in [`site/snapshot-store.js`](../site/snapshot-store.js), which
 matches on the date and replaces in place. Day keys are UTC, so a visitor's
@@ -184,6 +192,37 @@ reported rather than smoothed over.
   snapshot record automatically — but that record only covers days since deploy.
 - Regions other than EU are snapshotted only if `SNAPSHOT_REGIONS` lists them;
   the page itself displays EU.
+
+## Security posture
+
+The site is static and CDN-served, so there is no origin to overwhelm and no
+login to attack. What hardening exists:
+
+| Measure | Where |
+|---|---|
+| No unauthenticated write path | `cutoff-history` is `GET`/`HEAD` only; the scheduled job is the sole writer |
+| Blob growth capped | `MAX_RECORDS = 400` per season+region bucket |
+| Input validation | date format, region allowlist, score range 0–100000, rejected before storage |
+| CSP, HSTS, nosniff, frame denial, referrer + permissions policy | `netlify.toml`, applied to `/*` |
+
+The CSP allows exactly the hosts the page uses — `fonts.googleapis.com`,
+`fonts.gstatic.com`, `raider.io`, `*.worldofwarcraft.com` (portraits) and
+`*.raiderio.net` (dungeon art). It requires `'unsafe-inline'` for scripts and
+styles because `index.html` inlines both, so it is not an XSS backstop;
+`frame-ancestors`, `object-src`, `base-uri`, `img-src` and `connect-src` are
+where it earns its place. Verified in a headless browser against the real page,
+including a control request to a disallowed host to confirm the policy is
+actually enforced rather than silently absent.
+
+**Not covered.** Rate limiting is a Netlify plan feature (Web security →
+Firewall Traffic Rules), not something the code can do. On the free tier the
+realistic damage from a flood is bandwidth exhaustion — set a usage alert.
+
+**Known, unfixed.** The original `renderRoster()` and `dungHTML()` interpolate
+Raider.IO strings into `innerHTML` without escaping. WoW character names are
+alphanumeric and the rest is Raider.IO's fixed vocabulary, so it is not
+practically exploitable, but it is the one XSS-shaped thing in the codebase. It
+was left alone because the brief was not to modify existing behaviour.
 
 ## Tests
 

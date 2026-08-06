@@ -2,7 +2,7 @@
    Blobs. Covers the duplicate-write guarantee at the API layer. */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { handleRequest } from "../netlify/functions/cutoff-history.mjs";
+import { handleRequest, recordSnapshot } from "../netlify/functions/cutoff-history.mjs";
 
 const URL_BASE = "https://example.netlify.app/.netlify/functions/cutoff-history";
 
@@ -68,88 +68,114 @@ test("GET surfaces a storage failure as 502 rather than pretending it is empty",
   assert.equal(res.status, 502);
 });
 
-/* ── POST: the duplicate guarantee ──────────────────────────────────────── */
+/* ── The endpoint is read-only: no unauthenticated write path ───────────── */
 
-test("POST records a snapshot and GET reads it back", async () => {
+test("POST is refused — there is no public write path", async () => {
   const store = fakeStore();
+  const res = await handleRequest(post(REC), store);
+  assert.equal(res.status, 405);
+  assert.equal(res.headers.get("allow"), "GET, HEAD");
+  assert.match((await res.json()).error, /read-only/i);
+  assert.equal(store.writes, 0, "a POST reached storage");
+});
 
-  const write = await handleRequest(post(REC), store);
-  assert.equal(write.status, 200);
-  assert.deepEqual(await write.json(), {
-    ok: true, action: "inserted", changed: true, count: 1
-  });
+test("no method other than GET or HEAD can write", async () => {
+  const store = fakeStore();
+  for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
+    const res = await handleRequest(
+      new Request(URL_BASE, {
+        method,
+        headers: { "content-type": "application/json" },
+        body: method === "DELETE" ? undefined : JSON.stringify(REC)
+      }),
+      store
+    );
+    assert.equal(res.status, 405, `${method} was not refused`);
+  }
+  assert.equal(store.writes, 0);
+  assert.equal(Object.keys(store.data).length, 0, "storage was touched");
+});
 
-  const read = await handleRequest(get("season=season-mn-1&region=eu"), store);
-  const body = await read.json();
+test("HEAD is allowed alongside GET", async () => {
+  const store = fakeStore();
+  const res = await handleRequest(
+    new Request(`${URL_BASE}?season=season-mn-1&region=eu`, { method: "HEAD" }),
+    store
+  );
+  assert.equal(res.status, 200);
+});
+
+/* ── recordSnapshot: the duplicate guarantee, now writer-side only ──────── */
+
+test("recordSnapshot inserts, and GET reads it back", async () => {
+  const store = fakeStore();
+  const out = await recordSnapshot(store, REC);
+  assert.deepEqual(out, { ok: true, action: "inserted", changed: true, count: 1 });
+
+  const body = await (await handleRequest(get("season=season-mn-1&region=eu"), store)).json();
   assert.equal(body.records.length, 1);
   assert.equal(body.records[0].p990, 3000);
   assert.equal(body.records[0].p999, 3500);
 });
 
-test("posting the same day twice updates in place — never a second record", async () => {
+test("recording the same day twice updates in place — never a second record", async () => {
   const store = fakeStore();
-  await handleRequest(post(REC), store);
-  const res = await handleRequest(post({ ...REC, p990: 3050, p999: 3560 }), store);
+  await recordSnapshot(store, REC);
+  const out = await recordSnapshot(store, { ...REC, p990: 3050, p999: 3560 });
 
-  const body = await res.json();
-  assert.equal(body.action, "updated");
-  assert.equal(body.count, 1, "a duplicate record was created");
+  assert.equal(out.action, "updated");
+  assert.equal(out.count, 1, "a duplicate record was created");
 
-  const read = await handleRequest(get("season=season-mn-1&region=eu"), store);
-  const stored = (await read.json()).records;
-  assert.equal(stored.length, 1);
-  assert.equal(stored[0].p990, 3050, "the later value should win");
+  const body = await (await handleRequest(get("season=season-mn-1&region=eu"), store)).json();
+  assert.equal(body.records.length, 1);
+  assert.equal(body.records[0].p990, 3050, "the later value should win");
 });
 
-test("running the daily snapshot ten times leaves one record and nine no-op writes", async () => {
+test("running the daily job ten times leaves one record and one write", async () => {
   const store = fakeStore();
-  for (let i = 0; i < 10; i++) await handleRequest(post(REC), store);
+  for (let i = 0; i < 10; i++) await recordSnapshot(store, REC);
 
-  const read = await handleRequest(get("season=season-mn-1&region=eu"), store);
-  assert.equal((await read.json()).records.length, 1);
-  assert.equal(store.writes, 1,
-    "identical repeat posts should not churn the blob store");
+  const body = await (await handleRequest(get("season=season-mn-1&region=eu"), store)).json();
+  assert.equal(body.records.length, 1);
+  assert.equal(store.writes, 1, "identical repeat runs should not churn storage");
 });
 
-test("an unchanged repost reports changed:false", async () => {
+test("an unchanged re-run reports changed:false", async () => {
   const store = fakeStore();
-  await handleRequest(post(REC), store);
-  const again = await handleRequest(post(REC), store);
-  const body = await again.json();
-  assert.equal(body.changed, false);
-  assert.equal(body.count, 1);
+  await recordSnapshot(store, REC);
+  const again = await recordSnapshot(store, REC);
+  assert.equal(again.changed, false);
+  assert.equal(again.count, 1);
 });
 
 test("consecutive days accumulate as separate records", async () => {
   const store = fakeStore();
   for (const date of ["2026-08-04", "2026-08-05", "2026-08-06"]) {
-    await handleRequest(post({ ...REC, date }), store);
+    await recordSnapshot(store, { ...REC, date });
   }
   const body = await (await handleRequest(get("season=season-mn-1&region=eu"), store)).json();
   assert.deepEqual(body.records.map((r) => r.date),
     ["2026-08-04", "2026-08-05", "2026-08-06"]);
 });
 
-/* ── POST: season and region never mix ──────────────────────────────────── */
+/* ── Season and region never mix ────────────────────────────────────────── */
 
 test("the same date in two seasons is stored separately", async () => {
   const store = fakeStore();
-  await handleRequest(post(REC), store);
-  await handleRequest(post({ ...REC, season: "season-tww-3", p990: 9 }), store);
+  await recordSnapshot(store, REC);
+  await recordSnapshot(store, { ...REC, season: "season-tww-3", p990: 9 });
 
   const mn = await (await handleRequest(get("season=season-mn-1&region=eu"), store)).json();
   const tww = await (await handleRequest(get("season=season-tww-3&region=eu"), store)).json();
 
-  assert.equal(mn.records.length, 1);
-  assert.equal(tww.records.length, 1);
   assert.equal(mn.records[0].p990, 3000);
   assert.equal(tww.records[0].p990, 9);
 });
 
 test("the same date in two regions is stored separately", async () => {
   const store = fakeStore();
-  await handleRequest(post(REC), store);
-  await handleRequest(post({ ...REC, region: "us", p990: 7 }), store);
+  await recordSnapshot(store, REC);
+  await recordSnapshot(store, { ...REC, region: "us", p990: 7 });
 
   const eu = await (await handleRequest(get("season=season-mn-1&region=eu"), store)).json();
   const us = await (await handleRequest(get("season=season-mn-1&region=us"), store)).json();
@@ -159,56 +185,41 @@ test("the same date in two regions is stored separately", async () => {
   assert.equal(Object.keys(store.data).length, 2, "regions shared a bucket");
 });
 
-/* ── POST: validation ───────────────────────────────────────────────────── */
+/* ── recordSnapshot validation ──────────────────────────────────────────── */
 
-test("POST rejects unusable bodies without writing anything", async () => {
+test("recordSnapshot rejects unusable records without writing anything", async () => {
   const store = fakeStore();
   const bad = [
-    "not json at all",
-    JSON.stringify({}),
-    JSON.stringify({ date: "06/08/2026", p990: 3000, season: "season-mn-1", region: "eu" }),
-    JSON.stringify({ date: "2026-08-06", season: "season-mn-1", region: "eu" }),
-    JSON.stringify({ ...REC, region: "mars" }),
-    JSON.stringify({ ...REC, season: "x" })
+    null,
+    {},
+    { date: "06/08/2026", p990: 3000, season: "season-mn-1", region: "eu" },
+    { date: "2026-08-06", season: "season-mn-1", region: "eu" },
+    { ...REC, region: "mars" },
+    { ...REC, season: "x" }
   ];
-  for (const body of bad) {
-    const res = await handleRequest(post(body), store);
-    assert.equal(res.status, 400, `expected 400 for ${body.slice(0, 60)}`);
+  for (const raw of bad) {
+    const out = await recordSnapshot(store, raw);
+    assert.equal(out.ok, false, `should reject ${JSON.stringify(raw)}`);
+    assert.ok(out.error);
   }
-  assert.equal(store.writes, 0, "an invalid post reached storage");
+  assert.equal(store.writes, 0, "an invalid record reached storage");
 });
 
-test("POST rejects implausible scores rather than poisoning the history", async () => {
+test("recordSnapshot rejects implausible scores rather than poisoning history", async () => {
   const store = fakeStore();
   for (const bad of [{ p990: -5 }, { p999: 1e9 }]) {
-    const res = await handleRequest(post({ ...REC, ...bad }), store);
-    assert.equal(res.status, 400);
+    const out = await recordSnapshot(store, { ...REC, ...bad });
+    assert.equal(out.ok, false);
   }
   assert.equal(store.writes, 0);
 });
 
 test("a null threshold is treated as absent, not as a cutoff of zero", async () => {
   const store = fakeStore();
-  const res = await handleRequest(post({ ...REC, p999: null }), store);
-  assert.equal(res.status, 200);
+  const out = await recordSnapshot(store, { ...REC, p999: null });
+  assert.equal(out.ok, true);
 
   const body = await (await handleRequest(get("season=season-mn-1&region=eu"), store)).json();
   assert.equal(body.records[0].p990, 3000);
   assert.equal(body.records[0].p999, undefined, "null was stored as a real score");
-});
-
-test("POST surfaces a storage write failure as 502", async () => {
-  const store = fakeStore();
-  store.failOn = "set";
-  const res = await handleRequest(post(REC), store);
-  assert.equal(res.status, 502);
-});
-
-/* ── Other methods ──────────────────────────────────────────────────────── */
-
-test("unsupported methods are refused", async () => {
-  for (const method of ["DELETE", "PUT", "PATCH"]) {
-    const res = await handleRequest(new Request(URL_BASE, { method }), fakeStore());
-    assert.equal(res.status, 405);
-  }
 });

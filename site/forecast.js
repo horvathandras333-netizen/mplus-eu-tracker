@@ -114,13 +114,8 @@
       .then(function (data) { return Store.parse(data); })
       .catch(function () { return null; }); // null = server tier unavailable
   }
-  function serverWrite(record) {
-    return fetch(FN_BASE + "/cutoff-history", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(record)
-    }).then(function (r) { return r.ok; }).catch(function () { return false; });
-  }
+  /* There is deliberately no server write from the browser. The endpoint is
+     read-only; the scheduled job is the only writer. See cutoff-history.mjs. */
 
   /* ── Raider.IO: published history ───────────────────────────────────────
      The season-cutoffs response carries a `graphData` block holding Raider.IO's
@@ -858,7 +853,6 @@
       var snapshots = serverList === null
         ? localList
         : Store.merge(serverList, localList);
-      if (serverList !== null && record) serverWrite(record); // fire and forget
 
       /* Raider.IO's own series wins wherever it covers a day. */
       var merged = Store.filterSeasonRegion(
