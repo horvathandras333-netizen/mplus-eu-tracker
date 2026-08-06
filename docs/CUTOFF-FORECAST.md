@@ -1,8 +1,29 @@
 # Cutoff Forecast
 
-An isolated section appended to the bottom of the tracker page. It records the
-EU Mythic+ **Top 1%** (`p990`) and **Top 0.1%** (`p999`) cutoffs once per day and
-projects both to **11 August 2026**.
+An isolated section appended to the bottom of the tracker page. It charts the
+EU Mythic+ **Top 1%** (`p990`) and **Top 0.1%** (`p999`) cutoffs daily and
+projects both to the **EU weekly reset: Wednesday 12 August 2026, 04:00 UTC**.
+
+## The deadline
+
+Blizzard [permanently moved the EU weekly reset to 05:00 CET in November
+2022](https://eu.forums.blizzard.com/en/wow/t/weekly-reset-time-changing-to-0500-cet-on-16-november/398498).
+That is a fixed wall clock, so it is **04:00 UTC year round** — 06:00 CEST
+during summer time. Scores stop climbing there.
+
+Note this is a **Wednesday**. Tuesday is the *US* reset day; the two regions are
+a day apart, so an EU season deadline is never a Tuesday.
+
+Raider.IO samples the cutoffs each evening (observed 20:30–23:45 UTC), which
+means the last reading before the reset lands roughly seven hours before it. The
+horizon is therefore measured from the actual reading timestamp to the reset
+instant — about **5.3 days** on 6 Aug, not the 6.0 a midnight-to-midnight grid
+would imply. The projection walks whole days and then takes a part-day final
+step so it lands exactly on the reset.
+
+`TARGET_INSTANT`, `TARGET_DATE` and `TARGET_LABEL` in
+[`site/forecast-core.js`](../site/forecast-core.js) are the only places the
+deadline is defined.
 
 ## Where the history comes from
 
@@ -115,7 +136,7 @@ record and skip the blob write entirely when nothing changed.
 **Only the trailing 21 days are fitted** (`ANALYSIS_WINDOW_DAYS`). This matters
 more than any other choice here. Measured on the live EU season on 6 Aug 2026:
 
-| Window fitted | Implied rate | Projected gain by 11 Aug |
+| Window fitted | Implied rate | Projected gain by the reset |
 |---|---|---|
 | last 7 days | 3.75 /day | +18.8 |
 | last 21 days | 3.02 /day | +15.1 |

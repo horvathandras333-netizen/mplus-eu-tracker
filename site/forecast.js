@@ -22,7 +22,9 @@
   /* ── Configuration (mirrors index.html rather than reaching into it) ────── */
   var REGION = "eu";
   var SEASONS = ["season-mn-1", "season-tww-3", "season-tww-2"];
-  var TARGET_DATE = Core.TARGET_DATE;          // 2026-08-11
+  var TARGET = Core.TARGET_INSTANT;            // EU reset: Wed 12 Aug, 04:00 UTC
+  var TARGET_DATE = Core.TARGET_DATE;          // 2026-08-12
+  var TARGET_LABEL = Core.TARGET_LABEL;
   var MIN_WINDOW_DAYS = 7;                     // today + the previous six days
   var FN_BASE = "/.netlify/functions";
 
@@ -130,23 +132,28 @@
     if (!graph) return [];
 
     var byDate = Object.create(null);
+    var latestSampleAt = 0;
     SERIES.forEach(function (sr) {
       var block = graph[sr.key];
       var points = block && block.data;
       if (!Array.isArray(points)) return;
       points.forEach(function (p) {
         if (!p || !Number.isFinite(Number(p.x)) || !Number.isFinite(Number(p.y))) return;
-        var date = new Date(Number(p.x)).toISOString().slice(0, 10);
+        var at = Number(p.x);
+        var date = new Date(at).toISOString().slice(0, 10);
         var row = byDate[date] || (byDate[date] = {
           date: date, season: season, region: REGION, source: "raider-graph"
         });
         /* Several samples can land on one UTC day; the latest wins, matching
            how the store de-duplicates. */
         row[sr.key] = Number(p.y);
+        if (at > latestSampleAt) latestSampleAt = at;
       });
     });
 
-    return Object.keys(byDate).sort().map(function (d) { return byDate[d]; });
+    var list = Object.keys(byDate).sort().map(function (d) { return byDate[d]; });
+    list.latestSampleAt = latestSampleAt || null;
+    return list;
   }
 
   /* ── Raider.IO: current cutoffs (independent of the existing fetch) ─────── */
@@ -266,6 +273,8 @@
                   fmtScore(analysis.current)));
     rows.push(row("Expected increase",
                   ok ? "+" + fmtScore(analysis.increase) + " pts" : "—"));
+    rows.push(row("Time to reset",
+                  ok ? analysis.daysRemaining.toFixed(1) + " days" : "—"));
     rows.push(row("Forecast range",
                   ok ? fmtScore(analysis.low) + " – " + fmtScore(analysis.high) : "—"));
     rows.push(row("Blended daily rate", ok ? fmtRate(analysis.blendedRate) : "—"));
@@ -298,7 +307,7 @@
       h("div", {
         class: "fc-card-delta",
         html: ok
-          ? "predicted on " + fmtLongDate(TARGET_DATE) +
+          ? "at the " + escapeHtml(TARGET_LABEL) +
             " &nbsp;·&nbsp; <strong>+" + fmtScore(analysis.increase) + "</strong> from today"
           : "not enough data to project"
       }),
@@ -361,11 +370,16 @@
     });
     if (!Number.isFinite(firstDay)) return null;
 
-    var targetDay = Core.dayNumber(TARGET_DATE);
+    /* The horizon is measured in real elapsed days to the reset instant, so it
+       is generally fractional — the axis ends wherever that lands. */
+    var horizon = Math.max(
+      analyses.p990.daysRemaining || 0,
+      analyses.p999.daysRemaining || 0
+    );
     /* Always show today plus the previous six days, even before the record
        fills in — an axis window, not fabricated data. */
     var x0 = Math.min(firstDay, lastDay - (MIN_WINDOW_DAYS - 1));
-    var x1 = Math.max(targetDay, lastDay);
+    var x1 = Math.max(lastDay + horizon, lastDay);
     var xSpan = Math.max(1, x1 - x0);
 
     var vals = [];
@@ -449,9 +463,8 @@
       var top = [[X(lastDay), Y(a.current)]];
       var bot = [[X(lastDay), Y(a.current)]];
       proj.forEach(function (p) {
-        var day = Core.dayNumber(p.date);
-        top.push([X(day), Y(p.high)]);
-        bot.push([X(day), Y(p.low)]);
+        top.push([X(p.pos), Y(p.high)]);
+        bot.push([X(p.pos), Y(p.low)]);
       });
       var pts = top.concat(bot.reverse())
         .map(function (p) { return p[0].toFixed(1) + "," + p[1].toFixed(1); }).join(" ");
@@ -476,7 +489,7 @@
       var proj = a.projection || [];
       if (proj.length) {
         var fc = [[X(lastDay), Y(a.current)]].concat(proj.map(function (p) {
-          return [X(Core.dayNumber(p.date)), Y(p.value)];
+          return [X(p.pos), Y(p.value)];
         })).map(function (p) { return p[0].toFixed(1) + "," + p[1].toFixed(1); }).join(" ");
         svg.appendChild(s("polyline", {
           class: "fc-line-forecast", points: fc, stroke: color
@@ -492,7 +505,7 @@
       if (proj.length) {
         var end = proj[proj.length - 1];
         svg.appendChild(s("circle", {
-          class: "fc-dot-target", cx: X(Core.dayNumber(end.date)), cy: Y(end.value),
+          class: "fc-dot-target", cx: X(end.pos), cy: Y(end.value),
           r: 5, stroke: color
         }));
       }
@@ -525,19 +538,30 @@
   function wireTooltip(chart, analyses, wrap, tip) {
     /* Unified day → value lookup across both series. */
     var byDay = {};
+    function slot(pos) {
+      var key = pos.toFixed(4);
+      return byDay[key] || (byDay[key] = { pos: pos });
+    }
     SERIES.forEach(function (sr) {
       var a = analyses[sr.key];
       a.points.forEach(function (p) {
-        var d = Core.dayNumber(p.date);
-        (byDay[d] = byDay[d] || {})[sr.key] = { value: p.value, kind: "recorded" };
+        var e = slot(Core.dayNumber(p.date));
+        e.date = p.date;
+        e[sr.key] = { value: p.value, kind: "recorded" };
       });
       (a.projection || []).forEach(function (p) {
-        var d = Core.dayNumber(p.date);
-        (byDay[d] = byDay[d] || {})[sr.key] = { value: p.value, kind: "forecast" };
+        var e = slot(p.pos);
+        e.date = p.date;
+        e.at = p.at;
+        e.isTarget = p.isTarget;
+        e[sr.key] = { value: p.value, kind: "forecast" };
       });
     });
-    var days = Object.keys(byDay).map(Number).sort(function (a, b) { return a - b; });
+    var days = Object.keys(byDay)
+      .map(function (k) { return byDay[k].pos; })
+      .sort(function (a, b) { return a - b; });
     if (!days.length) return;
+    var entryAt = function (pos) { return byDay[pos.toFixed(4)]; };
 
     function hide() {
       tip.classList.remove("fc-on");
@@ -556,11 +580,13 @@
         if (dist < bestDist) { bestDist = dist; best = d; }
       });
 
-      var entry = byDay[best];
-      var dateStr = Core.dateFromDayNumber(best);
+      var entry = entryAt(best);
       var isForecast = SERIES.some(function (sr) {
         return entry[sr.key] && entry[sr.key].kind === "forecast";
       });
+      var heading = entry.isTarget
+        ? TARGET_LABEL
+        : fmtLongDate(entry.date || Core.dateFromDayNumber(Math.round(best)));
 
       chart.hoverLine.setAttribute("x1", chart.X(best));
       chart.hoverLine.setAttribute("x2", chart.X(best));
@@ -584,9 +610,12 @@
       });
 
       tip.innerHTML =
-        '<div class="fc-tip-date">' + escapeHtml(fmtLongDate(dateStr)) + '</div>' +
+        '<div class="fc-tip-date">' + escapeHtml(heading) + '</div>' +
         rows.join("") +
-        '<div class="fc-tip-kind">' + (isForecast ? "Forecast · estimate" : "Recorded") + '</div>';
+        '<div class="fc-tip-kind">' +
+        (entry.isTarget ? "Final estimate · season locks here"
+          : isForecast ? "Forecast · estimate" : "Recorded") +
+        '</div>';
 
       /* Position within the wrapper, flipping before it can overflow. */
       var wrapRect = wrap.getBoundingClientRect();
@@ -646,8 +675,13 @@
       ". Cutoffs climb steeply in the opening weeks of a season and flatten towards the " +
       "end; fitting the whole season would roughly triple the apparent rate and badly " +
       "overshoot. The earlier data is kept and counted, just not fitted.</p>" +
-      "<p>Each threshold is projected to " + escapeHtml(fmtLongDate(TARGET_DATE)) +
-      " from three independent estimates of the daily rate of increase:</p>" +
+      "<p>Each threshold is projected to the <strong>" + escapeHtml(TARGET_LABEL) +
+      "</strong> — Blizzard fixed the EU weekly reset to 05:00 CET in November 2022, " +
+      "which is 04:00 UTC year round (06:00 CEST in summer). Scores stop climbing " +
+      "there. Raider.IO samples each evening, so the horizon is measured from the " +
+      "last reading to that exact instant, not to the end of a calendar day — " +
+      (a.daysRemaining != null ? a.daysRemaining.toFixed(1) : "?") + " days from now. " +
+      "The projection blends three independent estimates of the daily rate of increase:</p>" +
       "<ol>" +
         "<li><strong>Ordinary linear regression</strong> over every recorded day " +
         "(weight <code>" + Math.round(0.30 * 100) + "%</code>) — the long-run slope, " +
@@ -663,8 +697,8 @@
       Math.round(Core.ACCEL_DAMPING * 100) + "%</code> of it is carried forward, and each " +
       "projected day is clamped to non-negative and to twice the observed pace — cutoffs " +
       "do not fall, and they rarely double their speed. The projection then accumulates " +
-      "day by day across the " + (a.daysRemaining != null ? a.daysRemaining : "remaining") +
-      " days to the target date rather than multiplying one rate by the horizon.</p>" +
+      "day by day to the reset (with a part-day final step) rather than multiplying " +
+      "one rate by the horizon.</p>" +
       "<p>The <strong>confidence range</strong> adds two things: how far the recorded points " +
       "scatter around the regression line, propagated over the horizon, and how much the " +
       "three rate estimates disagree with each other. It is widened further when few " +
@@ -716,7 +750,7 @@
       (a990.nAvailable > a990.n
         ? "last " + a990.n + " of " + a990.nAvailable + " days"
         : a990.n + " day" + (a990.n === 1 ? "" : "s")) +
-      " · to " + fmtShortDate(TARGET_DATE)
+      " · to EU reset " + fmtShortDate(TARGET_DATE)
     );
 
     if (state.liveError) {
@@ -840,7 +874,10 @@
       if (!merged.length) { renderEmpty(season, !!record); return; }
 
       render({
-        analyses: Core.analyseSnapshots(merged, { targetDate: TARGET_DATE }),
+        analyses: Core.analyseSnapshots(merged, {
+          targetDate: TARGET,
+          lastSampleAt: published.latestSampleAt || null
+        }),
         season: season,
         sourceLabel: sourceLabel,
         liveError: liveError,

@@ -283,6 +283,84 @@ test("reaching the target date leaves no horizon to forecast", () => {
   assert.match(a.warnings.join(" "), /target date has been reached/i);
 });
 
+/* ── The deadline is the EU weekly reset, not a calendar day ────────────── */
+
+test("the default target is the EU weekly reset: Wednesday 04:00 UTC", () => {
+  assert.equal(Core.TARGET_INSTANT, "2026-08-12T04:00:00Z");
+  assert.equal(Core.TARGET_DATE, "2026-08-12");
+  const d = new Date(Core.TARGET_INSTANT);
+  assert.equal(d.getUTCDay(), 3, "must fall on a Wednesday");
+  assert.equal(d.getUTCHours(), 4, "EU reset is 05:00 CET = 04:00 UTC");
+});
+
+test("instantDays accepts a bare date or a full timestamp", () => {
+  const midnight = Core.instantDays("2026-08-12");
+  const reset = Core.instantDays("2026-08-12T04:00:00Z");
+  assert.equal(midnight, Core.dayNumber("2026-08-12"));
+  assert.ok(Math.abs(reset - midnight - 4 / 24) < 1e-9);
+});
+
+test("the horizon runs from the evening sample to the reset instant", () => {
+  // Last reading 2026-08-06 at 21:00 UTC; reset 2026-08-12 04:00 UTC.
+  // That is 5 days 7 hours = 5.29 days, not the 6.0 a midnight grid implies.
+  const a = Core.analyseSeries(series([3940, 3946, 3950, 3956, 3959, 3966, 3973]), {
+    lastSampleAt: Date.parse("2026-08-06T21:00:00Z")
+  });
+  assert.ok(Math.abs(a.daysRemaining - 5.2917) < 0.01,
+    `daysRemaining was ${a.daysRemaining}`);
+  assert.ok(a.daysRemaining < 6, "must not count a full extra day to midnight");
+});
+
+test("without a sample timestamp the horizon falls back to the date grid", () => {
+  const a = Core.analyseSeries(series([3940, 3946, 3950, 3956, 3959, 3966, 3973]));
+  assert.ok(Math.abs(a.daysRemaining - (6 + 4 / 24)) < 1e-6);
+});
+
+test("a nonsense sample timestamp is ignored rather than trusted", () => {
+  const a = Core.analyseSeries(series([3000, 3010, 3020, 3030]), {
+    lastSampleAt: Date.parse("2020-01-01T00:00:00Z")  // years off the last point
+  });
+  assert.ok(Math.abs(a.daysRemaining - (6 + 4 / 24)) < 1e-6,
+    "should fall back to the date grid, not project across years");
+});
+
+test("the projection lands exactly on the reset, with a part-day final step", () => {
+  const a = Core.analyseSeries(series([3940, 3946, 3950, 3956, 3959, 3966, 3973]), {
+    lastSampleAt: Date.parse("2026-08-06T21:00:00Z")
+  });
+  const last = a.projection[a.projection.length - 1];
+  assert.equal(a.projection.length, 6, "5 whole days plus a partial");
+  assert.equal(last.isTarget, true);
+  assert.equal(last.at, "2026-08-12T04:00:00.000Z");
+  assert.ok(Math.abs(last.value - a.predicted) < 1e-9);
+
+  // Whole-day steps, then a short one — never a step longer than a day.
+  const steps = a.projection.map((p, i) =>
+    i === 0 ? p.pos - Core.dayNumber(a.currentDate) : p.pos - a.projection[i - 1].pos);
+  steps.forEach((s) => assert.ok(s > 0 && s <= 1 + 1e-9, `bad step ${s}`));
+  assert.ok(steps[steps.length - 1] < 1, "final step should be a part day");
+});
+
+test("drawing positions stay anchored to the last plotted point", () => {
+  // The dashed line must continue from the last dot, not jump to the sample
+  // time — so the first projected position is exactly one day after it.
+  const a = Core.analyseSeries(series([3940, 3946, 3950, 3956, 3959, 3966, 3973]), {
+    lastSampleAt: Date.parse("2026-08-06T21:00:00Z")
+  });
+  assert.equal(a.projection[0].pos, Core.dayNumber("2026-08-06") + 1);
+});
+
+test("once the reset has passed there is nothing left to forecast", () => {
+  const a = Core.analyseSeries(
+    series([3940, 3946, 3950, 3956, 3959, 3966, 3973], "2026-08-13"),
+    { lastSampleAt: Date.parse("2026-08-13T21:00:00Z") }
+  );
+  assert.equal(a.daysRemaining, 0);
+  assert.equal(a.projection.length, 0);
+  assert.equal(a.predicted, a.current);
+  assert.match(a.warnings.join(" "), /target date has been reached/i);
+});
+
 /* ── Trailing analysis window ───────────────────────────────────────────── */
 
 test("only the trailing window is fitted, and the rest is still counted", () => {

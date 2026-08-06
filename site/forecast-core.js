@@ -14,7 +14,14 @@
   "use strict";
 
   /* ── Tunable constants (documented in the methodology panel) ─────────────── */
-  var TARGET_DATE     = "2026-08-11"; // season-end date we forecast towards
+
+  /* The deadline is the EU weekly reset: Wednesday 05:00 CET, which Blizzard
+     fixed to that wall clock in Nov 2022 — i.e. 04:00 UTC all year (06:00 CEST
+     in summer). Scores stop climbing there, so the horizon runs to that exact
+     instant rather than to the end of a calendar day. */
+  var TARGET_INSTANT  = "2026-08-12T04:00:00Z";
+  var TARGET_DATE     = "2026-08-12";
+  var TARGET_LABEL    = "EU reset · Wed 12 Aug 2026, 04:00 UTC";
   var MS_DAY          = 86400000;
   var HALF_LIFE_DAYS  = 3;    // weighted regression: weight halves every 3 days
   var RECENT_DAYS     = 3;    // "recent rate" look-back window
@@ -39,6 +46,16 @@
   function dayNumber(dateStr) {
     var t = Date.parse(String(dateStr).slice(0, 10) + "T00:00:00Z");
     return Number.isNaN(t) ? NaN : Math.round(t / MS_DAY);
+  }
+
+  /**
+   * Fractional day number for an instant. Accepts a bare date (midnight UTC)
+   * or a full ISO timestamp, so a target can carry a time of day.
+   */
+  function instantDays(iso) {
+    var s = String(iso);
+    var t = Date.parse(s.length <= 10 ? s + "T00:00:00Z" : s);
+    return Number.isNaN(t) ? NaN : t / MS_DAY;
   }
 
   function dateFromDayNumber(n) {
@@ -143,7 +160,7 @@
    */
   function analyseSeries(rawPoints, options) {
     var opts = options || {};
-    var targetDate = opts.targetDate || TARGET_DATE;
+    var targetDate = opts.targetDate || TARGET_INSTANT;
     var all = cleanSeries(rawPoints);
 
     /* Trim to the trailing analysis window. `windowDays: 0` disables it. */
@@ -156,7 +173,7 @@
     }
 
     var n = points.length;
-    var targetDay = dayNumber(targetDate);
+    var targetPos = instantDays(targetDate);
 
     var base = {
       targetDate: targetDate,
@@ -182,9 +199,21 @@
     var ys = points.map(function (p) { return p.value; });
     var spanDays = lastDay - firstDay;
     var current = ys[n - 1];
-    var daysRemaining = Math.max(0, targetDay - lastDay);
+
+    /* Raider.IO samples each evening, so the last reading is ~21:00 UTC on its
+       date, not midnight. When the caller knows that timestamp, measure the
+       horizon from the reading itself — otherwise the run-up to an early-morning
+       reset is overstated by most of a day. */
+    var lastSamplePos = lastDay;
+    if (Number.isFinite(opts.lastSampleAt)) {
+      var sampled = opts.lastSampleAt / MS_DAY;
+      if (Math.abs(sampled - lastDay) < 1.5) lastSamplePos = sampled;
+    }
+    var daysRemaining = Math.max(0, targetPos - lastSamplePos);
 
     base.current = current;
+    base.lastSamplePos = lastSamplePos;
+    base.targetPos = targetPos;
     base.currentDate = points[n - 1].date;
     base.firstDate = points[0].date;
     base.spanDays = spanDays;
@@ -255,13 +284,29 @@
     var maxRate = Math.max(Math.abs(blendedRate) * 2, Math.abs(recentDaily) * 2, 1);
     var projection = [];
     var running = current;
-    for (var d = 1; d <= daysRemaining; d++) {
-      var rate = blendedRate + accelPerDay * ACCEL_DAMPING * d;
+    var elapsed = 0;
+    /* Whole days, then a partial final step so the path lands exactly on the
+       target instant rather than overshooting to the next midnight. */
+    while (elapsed < daysRemaining - 1e-9) {
+      var step = Math.min(1, daysRemaining - elapsed);
+      elapsed += step;
+      var rate = blendedRate + accelPerDay * ACCEL_DAMPING * elapsed;
       /* Cutoffs are non-decreasing in practice, and no single day plausibly
          doubles the observed pace — clamp to keep long horizons sane. */
       rate = Math.min(Math.max(rate, 0), maxRate);
-      running += rate;
-      projection.push({ date: dateFromDayNumber(lastDay + d), value: running });
+      running += rate * step;
+      /* `pos` is a drawing coordinate anchored to the last plotted point, so
+         the dashed line continues from the last dot instead of detaching by
+         the few hours between midnight and the evening sample. `at` carries
+         the true instant for tooltips. */
+      var pos = lastDay + elapsed;
+      projection.push({
+        pos: pos,
+        date: dateFromDayNumber(Math.round(lastSamplePos + elapsed - 0.5)),
+        at: new Date((lastSamplePos + elapsed) * MS_DAY).toISOString(),
+        value: running,
+        isTarget: daysRemaining - elapsed < 1e-9
+      });
     }
     var predicted = running;
     var increase = predicted - current;
@@ -364,7 +409,10 @@
   }
 
   return {
+    TARGET_INSTANT: TARGET_INSTANT,
     TARGET_DATE: TARGET_DATE,
+    TARGET_LABEL: TARGET_LABEL,
+    instantDays: instantDays,
     HALF_LIFE_DAYS: HALF_LIFE_DAYS,
     RECENT_DAYS: RECENT_DAYS,
     ACCEL_DAMPING: ACCEL_DAMPING,

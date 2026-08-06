@@ -13,7 +13,8 @@ its CSS and JS are inline and the only external dependency is Google Fonts.
 Alongside it sits the **Cutoff Forecast** section, added as an isolated add-on
 in separate files (`forecast*.js`, `forecast.css`, `snapshot-store.js`) that
 `index.html` only links to. It charts Raider.IO's published daily series for the
-Top 1% and Top 0.1% cutoffs and projects both to 11 August 2026 — see
+Top 1% and Top 0.1% cutoffs and projects both to the EU weekly reset on
+Wednesday 12 August 2026, 04:00 UTC — see
 [docs/CUTOFF-FORECAST.md](docs/CUTOFF-FORECAST.md) for how it stores data, how
 the forecast is calculated, and how to deploy the daily snapshot service.
 
